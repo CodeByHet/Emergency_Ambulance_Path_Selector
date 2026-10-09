@@ -122,3 +122,5 @@ python tests/parity.py     # Python vs JavaScript engine, about 1,300 scenarios
 - **Close every road into a hospital** to see the "no route" case.
 - **Mode: Negative road.** Compare Dijkstra with Bellman-Ford, then click "Show where Dijkstra went wrong".
 - **Mode: Negative cycle.** Watch Bellman-Ford run all 18 passes and then find the cycle.
+- <img width="2666" height="1316" alt="image" src="https://github.com/user-attachments/assets/efd9eab2-ae79-424f-8cc9-228a5d902057" />
+
