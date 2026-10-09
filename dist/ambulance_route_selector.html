@@ -1,0 +1,1467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>Ambulance Route Selector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the road network is the work surface (left, framed); the algorithm trace is a plain
+   column beside it, separated by a rule rather than a floating card. Results and the route
+   table follow as ruled sections. Palette: deep navy, white, neutral gray, slate; red only for
+   emergency signals (destination, ignored road, negative cycle); green only for a road kept /
+   a correct answer. Traffic colour is used only where it carries meaning (busy roads). */
+:root {
+  --paper: #F4F5F7;
+  --surface: #FFFFFF;
+  --surface-2: #EEF0F3;
+  --ink: #142036;
+  --muted: #536072;
+  --line: #DCE0E6;
+  --line-strong: #A9B2BE;
+  --land: #F7F8F6;
+  --grid: #E7E9E5;
+  --water: #D3DEE8;
+  --water-ink: #587490;
+  --navy: #1B2D52;
+  --link: #24447F;
+  --slate: #5D6B7F;
+  --tree: #8FA3C9;
+  --signal: #B42318;
+  --ok: #1D7347;
+  --low: #CDD2D9;
+  --medium: #C29235;
+  --heavy: #A5523E;
+  --closed: #C4C9D0;
+  --casing: #FFFFFF;
+  --on-accent: #FFFFFF;
+  --on-final: #FFFFFF;
+  --font-sans: "IBM Plex Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --radius: 4px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #10161F; --surface: #161E2A; --surface-2: #1D2735; --ink: #E5E9EF; --muted: #A1ABB9;
+    --line: #283244; --line-strong: #46526A; --land: #141B26; --grid: #1B2432; --water: #213551; --water-ink: #8FA9C6;
+    --navy: #B3C3E2; --link: #B3C3E2; --slate: #7A889C; --tree: #5872A3;
+    --signal: #F0796B; --ok: #55B886;
+    --low: #3A4353; --medium: #A5813C; --heavy: #A05E4C; --closed: #3B4556;
+    --casing: #10161F; --on-accent: #10161F; --on-final: #10161F;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #10161F; --surface: #161E2A; --surface-2: #1D2735; --ink: #E5E9EF; --muted: #A1ABB9;
+  --line: #283244; --line-strong: #46526A; --land: #141B26; --grid: #1B2432; --water: #213551; --water-ink: #8FA9C6;
+  --navy: #B3C3E2; --link: #B3C3E2; --slate: #7A889C; --tree: #5872A3;
+  --signal: #F0796B; --ok: #55B886;
+  --low: #3A4353; --medium: #A5813C; --heavy: #A05E4C; --closed: #3B4556;
+  --casing: #10161F; --on-accent: #10161F; --on-final: #10161F;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-sans); font-size: 15px; line-height: 1.5; }
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.page { max-width: 1400px; margin: 0 auto; padding-inline: 24px; padding-block: 0 48px; display: grid; gap: 24px; }
+.num, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* App bar and controls */
+.masthead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 24px; padding-block: 18px 14px; border-bottom: 1px solid var(--line); }
+h1 { margin: 0; font-size: 20px; line-height: 1.3; font-weight: 600; letter-spacing: -0.005em; }
+.masthead p { margin: 0; color: var(--muted); font-size: 13px; }
+.controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; }
+.field { display: grid; gap: 4px; flex: 1 1 200px; max-width: 260px; min-width: 0; }
+.field span { font-size: 13px; font-weight: 500; color: var(--muted); }
+select { width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); font-size: 14px; }
+.actions { display: flex; align-items: center; gap: 16px; }
+.btn { height: 36px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--surface-2); }
+.btn-primary { background: var(--navy); border-color: var(--navy); color: var(--on-accent); }
+.btn-primary:hover { background: var(--navy); filter: brightness(1.15); }
+.btn:disabled { opacity: .4; cursor: default; }
+.btn-text { padding: 2px 0; border: 0; background: none; color: var(--link); font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.btn-text:hover { text-decoration-color: currentColor; }
+
+/* Workspace */
+.workspace { display: grid; grid-template-columns: minmax(0, 64fr) minmax(0, 36fr); gap: 0; align-items: start; border-top: 1px solid var(--line); }
+.map-panel { min-width: 0; display: grid; gap: 10px; padding: 20px 24px 0 0; }
+.map-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--land); }
+.map-wrap { position: relative; min-width: 600px; }
+#map { display: block; width: 100%; height: auto; }
+.map-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend svg { flex: none; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.toggle input { accent-color: var(--navy); margin: 0; }
+.hint { margin: 0; font-size: 13px; color: var(--muted); }
+
+.tip { position: absolute; z-index: 5; pointer-events: none; max-width: 260px; padding: 8px 10px; border-radius: var(--radius); background: var(--ink); color: var(--paper); font-size: 13px; line-height: 1.4; transform: translate(-50%, calc(-100% - 12px)); }
+.toast { position: absolute; z-index: 6; left: 50%; bottom: 16px; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 8px 14px; border-radius: var(--radius); background: var(--ink); color: var(--paper); font-size: 14px; text-align: center; }
+
+/* SVG map */
+.land { fill: var(--land); }
+.gridline { stroke: var(--grid); stroke-width: 1; }
+.river { fill: none; stroke: var(--water); stroke-width: 34; stroke-linecap: round; stroke-linejoin: round; }
+.lake { fill: var(--water); }
+.water-label { fill: var(--water-ink); font-size: 15px; font-style: italic; letter-spacing: .1em; }
+.map-note { fill: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.scalebar { stroke: var(--ink); stroke-width: 2; fill: none; }
+.north path { fill: var(--ink); }
+.north text { fill: var(--ink); font-size: 14px; font-weight: 600; text-anchor: middle; }
+
+.road { fill: none; stroke-width: 5; stroke-linecap: round; }
+.road.t-low { stroke: var(--low); }
+.road.t-medium { stroke: var(--medium); stroke-opacity: .85; }
+.road.t-high { stroke: var(--heavy); stroke-opacity: .85; }
+.road.t-closed { stroke: var(--closed); stroke-dasharray: 2 9; }
+.road.neg { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 7 5; stroke-opacity: 1; }
+.road.hover { stroke-width: 8; }
+.road.neg.hover { stroke-width: 5; }
+.road-hit { fill: none; stroke: transparent; stroke-width: 22; stroke-linecap: round; cursor: pointer; }
+.tree { stroke: var(--tree); stroke-width: 6; stroke-linecap: round; }
+.dropped { stroke: var(--signal); stroke-width: 3; stroke-dasharray: 2 6; stroke-linecap: round; }
+.active { fill: none; stroke-width: 5; stroke-linecap: round; }
+.active.r-accept { stroke: var(--ok); }
+.active.r-reject { stroke: var(--signal); stroke-dasharray: 9 6; }
+.active.r-skip { stroke: var(--slate); stroke-dasharray: 3 6; }
+.arrow-accept { fill: var(--ok); } .arrow-reject { fill: var(--signal); } .arrow-skip { fill: var(--slate); } .arrow-ink { fill: var(--ink); }
+.route-casing { fill: none; stroke: var(--casing); stroke-width: 13; stroke-linecap: round; stroke-linejoin: round; }
+.route { fill: none; stroke: var(--navy); stroke-width: 7; stroke-linecap: round; stroke-linejoin: round; }
+.cycle { fill: none; stroke: var(--signal); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 10 6; }
+.alt-line { fill: none; stroke: var(--ink); stroke-width: 3; stroke-dasharray: 8 6; stroke-linecap: round; stroke-linejoin: round; }
+
+.elabel rect { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+.elabel text { fill: var(--muted); font-family: var(--font-mono); font-size: 12px; text-anchor: middle; dominant-baseline: central; }
+.elabel.hot rect, .elabel.neg rect { stroke: var(--ink); }
+.elabel.hot text, .elabel.neg text { fill: var(--ink); font-weight: 500; }
+
+.node { cursor: pointer; }
+.node .body { fill: var(--surface); stroke: var(--line-strong); stroke-width: 2; }
+.node .dist { fill: var(--muted); font-family: var(--font-mono); font-size: 12px; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.node .label { fill: var(--ink); font-size: 15px; font-weight: 500; paint-order: stroke; stroke: var(--land); stroke-width: 4; stroke-linejoin: round; pointer-events: none; }
+.node .label .flag-a { fill: var(--navy); font-weight: 600; }
+.node .label .flag-b { fill: var(--signal); font-weight: 600; }
+.node .ring { fill: none; stroke: var(--ink); stroke-width: 1.5; opacity: 0; }
+.node.frontier .body { stroke: var(--navy); stroke-width: 3; }
+.node.frontier .dist { fill: var(--ink); }
+.node.final .body { fill: var(--slate); stroke: var(--slate); }
+.node.final .dist { fill: var(--on-final); }
+.node.affected .body { stroke: var(--signal); stroke-width: 3; }
+.node.affected .dist { fill: var(--signal); }
+.node.current .ring { opacity: 1; }
+.node.target-accept .body { stroke: var(--ok); stroke-width: 3.5; }
+.node.target-reject .body { stroke: var(--signal); stroke-width: 3.5; }
+.node.onroute .body { fill: var(--navy); stroke: var(--navy); }
+.node.onroute .dist { fill: var(--on-accent); }
+.node:hover .body { stroke-width: 3.5; }
+.ambulance .amb-body { fill: var(--casing); stroke: var(--ink); stroke-width: 1.6; }
+.ambulance .amb-mark { fill: var(--signal); }
+.ambulance .amb-wheel { fill: var(--ink); }
+
+/* Step column: a ruled column beside the map, not a floating card */
+.step-panel { position: sticky; top: 0; display: grid; gap: 18px; align-content: start; min-width: 0; max-height: 100vh; overflow-y: auto; padding: 20px 0 20px 24px; border-left: 1px solid var(--line); }
+.step-panel > * { min-width: 0; }
+.notice { display: grid; gap: 6px; padding-bottom: 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.notice p { margin: 0; }
+.notice .notice-title { font-weight: 600; }
+.notice details summary { cursor: pointer; color: var(--link); font-weight: 500; width: max-content; }
+.notice details p { margin-top: 6px; color: var(--muted); }
+.player { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.player-buttons { display: flex; gap: 8px; }
+.player-buttons .btn { min-width: 68px; }
+.speed { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.speed select { width: auto; height: 32px; padding: 0 8px; font-size: 13px; }
+.scrub-block { display: grid; gap: 6px; }
+#scrub { width: 100%; margin: 0; accent-color: var(--navy); }
+.player-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; font-size: 13px; color: var(--muted); }
+.player-meta .links { display: flex; gap: 16px; }
+.player-meta .btn-text { font-size: 13px; padding: 0; }
+.explain { display: grid; gap: 8px; min-height: 150px; align-content: start; padding-top: 16px; border-top: 1px solid var(--line); }
+.explain h2 { margin: 0; font-size: 16px; line-height: 1.4; font-weight: 600; text-wrap: balance; }
+.explain p { margin: 0; max-width: 65ch; }
+.math { padding-top: 8px; border-top: 1px dashed var(--line); font-family: var(--font-mono); font-size: 13px; color: var(--ink); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.math .ok { color: var(--ok); font-weight: 500; }
+.math .no { color: var(--signal); font-weight: 500; }
+h3 { margin: 0 0 4px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.queue p { margin: 0; font-family: var(--font-mono); font-size: 13px; line-height: 1.7; }
+.queue b { font-weight: 600; color: var(--ink); }
+.queue s { color: var(--muted); }
+.tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.tab { padding: 6px 0; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: none; font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.code { margin: 0; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7; overflow-x: auto; }
+.code span { display: block; padding: 0 8px; white-space: pre; border-radius: 2px; }
+.code span i { display: inline-block; width: 2em; font-style: normal; color: var(--line-strong); user-select: none; }
+.code span.on { background: var(--surface-2); color: var(--ink); box-shadow: inset 2px 0 0 var(--navy); font-weight: 500; }
+.code span.on i { color: var(--muted); }
+.table-scroll { overflow-x: auto; }
+.step-panel .table-scroll { max-height: 360px; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { position: sticky; top: 0; padding: 8px; border-bottom: 1px solid var(--line-strong); background: var(--paper); text-align: left; font-size: 13px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.num, th.num { text-align: right; white-space: nowrap; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+th.num { font-family: var(--font-sans); }
+tr.cur td { background: var(--surface-2); }
+.st-final { color: var(--ink); font-weight: 500; }
+.st-frontier { color: var(--navy); }
+.st-unseen { color: var(--muted); }
+.st-affected { color: var(--signal); }
+
+/* Result, comparison, routes */
+.results { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px 48px; align-items: start; padding-top: 24px; border-top: 1px solid var(--line); }
+.results-main { display: grid; gap: 28px; min-width: 0; }
+.result { display: grid; gap: 12px; }
+.result h2, .compare h2, .routes h2 { margin: 0; font-size: 18px; line-height: 1.35; font-weight: 600; text-wrap: balance; }
+.route-line { margin: 0; font-size: 15px; color: var(--muted); }
+.route-line b { color: var(--ink); font-weight: 500; }
+.figures { display: flex; flex-wrap: wrap; gap: 8px 40px; margin: 0; }
+.figures div { display: grid; gap: 0; }
+.figures dt { font-size: 13px; color: var(--muted); }
+.figures dd { margin: 0; font-family: var(--font-mono); font-size: 18px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.figures dd small { font-family: var(--font-sans); font-size: 13px; color: var(--muted); font-weight: 400; }
+.result-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+#driveStatus { font-size: 14px; color: var(--muted); }
+.compare { display: grid; gap: 10px; min-width: 0; }
+.compare-table td.alg { font-weight: 500; }
+.compare-table td.alg small { margin-left: 8px; font-weight: 400; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.verdict-bad { color: var(--signal); font-weight: 500; }
+.verdict-good { color: var(--ok); font-weight: 500; }
+.routes { display: grid; gap: 10px; min-width: 0; }
+.routes-table tbody tr:hover td { background: var(--surface-2); }
+.routes-table tr.chosen td { font-weight: 600; color: var(--navy); }
+.routes-table td.num { width: 1%; }
+@media (max-width: 1000px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .map-panel { padding-right: 0; }
+  .step-panel { position: static; max-height: none; padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--line); margin-top: 20px; }
+  .field { max-width: none; }
+  .results { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .page { padding-inline: 16px; }
+  .actions { width: 100%; justify-content: space-between; }
+}
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <h1>Ambulance Route Selector</h1>
+    <p>Dijkstra's shortest path · DAA assignment</p>
+  </header>
+
+  <form class="controls" id="controls">
+    <label class="field"><span>Ambulance at (A)</span><select id="srcSel"></select></label>
+    <label class="field"><span>Hospital (B)</span><select id="dstSel"></select></label>
+    <label class="field"><span>Mode</span><select id="modeSel"></select></label>
+    <div class="actions">
+      <button type="submit" class="btn btn-primary">Find route</button>
+      <button type="button" class="btn-text" id="resetTraffic">Reset traffic</button>
+    </div>
+  </form>
+
+  <main class="workspace">
+    <section class="map-panel" aria-label="City map">
+      <div class="map-scroll">
+        <div class="map-wrap" id="mapWrap">
+          <svg id="map" role="img" aria-label="Map of junctions, hospitals and roads"></svg>
+          <div class="tip" id="tip" hidden></div>
+          <div class="toast" id="toast" role="status" hidden></div>
+        </div>
+      </div>
+      <div class="map-foot">
+        <div class="legend" id="legend"></div>
+        <label class="toggle"><input type="checkbox" id="costToggle"> Show road costs</label>
+      </div>
+    </section>
+
+    <aside class="step-panel" aria-label="Algorithm steps">
+      <div class="notice" id="notice" hidden></div>
+      <div class="player">
+        <div class="player-buttons">
+          <button type="button" class="btn" id="prevBtn">Back</button>
+          <button type="button" class="btn btn-primary" id="playBtn">Play</button>
+          <button type="button" class="btn" id="nextBtn">Next</button>
+        </div>
+        <label class="speed">Speed
+          <select id="speed">
+            <option value="1500">Slow</option>
+            <option value="800" selected>Normal</option>
+            <option value="350">Fast</option>
+            <option value="110">Very fast</option>
+          </select>
+        </label>
+      </div>
+      <div class="scrub-block">
+        <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Step">
+        <div class="player-meta">
+          <span id="counter" class="num"></span>
+          <span class="links"><button type="button" class="btn-text" id="firstBtn">Restart</button><button type="button" class="btn-text" id="lastBtn">Skip to result</button></span>
+        </div>
+      </div>
+
+      <div class="explain" aria-live="polite">
+        <h2 id="stepTitle"></h2>
+        <p id="stepText"></p>
+        <p class="math" id="stepMath"></p>
+      </div>
+
+      <div class="queue">
+        <h3 id="queueTitle">Priority queue</h3>
+        <p id="queue"></p>
+      </div>
+
+      <div>
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab" role="tab" id="tabCode" aria-selected="true" aria-controls="codePane">Pseudocode</button>
+          <button type="button" class="tab" role="tab" id="tabTable" aria-selected="false" aria-controls="tablePane">Distance table</button>
+        </div>
+        <div id="codePane" role="tabpanel"><pre class="code" id="code"></pre></div>
+        <div id="tablePane" role="tabpanel" hidden>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Place</th><th class="num">Cost (min)</th><th>Via</th><th>Status</th></tr></thead>
+              <tbody id="distBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div class="results">
+    <div class="results-main">
+      <section class="result" id="result" aria-live="polite"></section>
+      <section class="compare" id="compare" hidden></section>
+    </div>
+    <section class="routes" id="routes">
+      <h2 id="routesTitle">Other routes</h2>
+      <table class="routes-table">
+        <thead><tr><th>Route</th><th class="num">Time</th></tr></thead>
+        <tbody id="routesBody"></tbody>
+      </table>
+    </section>
+  </div>
+</div>
+
+<script id="city-data" type="application/json">{"city": "Ahmedabad (west)", "speeds": {"low": 45, "medium": 28, "high": 14}, "nodes": [{"id": "GOTA", "name": "Gota Circle", "short": "Gota", "lat": 23.1047, "lon": 72.5401, "type": "junction", "label": "e"}, {"id": "SOLA", "name": "Sola Bridge", "short": "Sola Bridge", "lat": 23.07, "lon": 72.5185, "type": "junction", "label": "e"}, {"id": "SCIENCE", "name": "Science City Road", "short": "Science City", "lat": 23.079, "lon": 72.499, "type": "junction", "label": "w"}, {"id": "THALTEJ", "name": "Thaltej Cross Road", "short": "Thaltej", "lat": 23.0501, "lon": 72.508, "type": "junction", "label": "sw"}, {"id": "DRIVEIN", "name": "Drive-in Road", "short": "Drive-in", "lat": 23.052, "lon": 72.5335, "type": "junction", "label": "ne"}, {"id": "HELMET", "name": "Helmet Circle", "short": "Helmet Circle", "lat": 23.053, "lon": 72.5475, "type": "junction", "label": "ne"}, {"id": "BODAK", "name": "Judges Bungalow, Bodakdev", "short": "Bodakdev", "lat": 23.044, "lon": 72.517, "type": "junction", "label": "s"}, {"id": "VASTRA", "name": "Vastrapur Lake", "short": "Vastrapur", "lat": 23.0396, "lon": 72.529, "type": "junction", "label": "sw"}, {"id": "ISCON", "name": "Iscon Cross Road", "short": "Iscon", "lat": 23.0265, "lon": 72.507, "type": "junction", "label": "w"}, {"id": "SHIVR", "name": "Shivranjani Cross Road", "short": "Shivranjani", "lat": 23.0249, "lon": 72.53, "type": "junction", "label": "s"}, {"id": "VIJAY", "name": "Vijay Cross Road", "short": "Vijay X Rd", "lat": 23.041, "lon": 72.552, "type": "junction", "label": "ne"}, {"id": "PANJRA", "name": "Panjrapole", "short": "Panjrapole", "lat": 23.027, "lon": 72.548, "type": "junction", "label": "sw"}, {"id": "NAVRANG", "name": "Navrangpura", "short": "Navrangpura", "lat": 23.037, "lon": 72.56, "type": "junction", "label": "e"}, {"id": "PALDI", "name": "Paldi", "short": "Paldi", "lat": 23.011, "lon": 72.562, "type": "junction", "label": "w"}, {"id": "SOLACIV", "name": "GMERS Sola Civil Hospital", "short": "Sola Civil", "lat": 23.0735, "lon": 72.5145, "type": "hospital", "label": "n"}, {"id": "ZYDUS", "name": "Zydus Hospital", "short": "Zydus", "lat": 23.056, "lon": 72.504, "type": "hospital", "label": "w"}, {"id": "SAL", "name": "SAL Hospital", "short": "SAL", "lat": 23.056, "lon": 72.524, "type": "hospital", "label": "n"}, {"id": "STERL", "name": "Sterling Hospital", "short": "Sterling", "lat": 23.048, "lon": 72.541, "type": "hospital", "label": "s"}, {"id": "VSH", "name": "V.S. Hospital", "short": "V.S.", "lat": 23.023, "lon": 72.571, "type": "hospital", "label": "e"}], "edges": [{"id": "GOTA~SOLA", "u": "GOTA", "v": "SOLA", "km": 5.78, "traffic": "low", "oneway": false, "cost": null}, {"id": "GOTA~SCIENCE", "u": "GOTA", "v": "SCIENCE", "km": 6.608, "traffic": "low", "oneway": false, "cost": null}, {"id": "SCIENCE~SOLA", "u": "SCIENCE", "v": "SOLA", "km": 2.901, "traffic": "medium", "oneway": false, "cost": null}, {"id": "SCIENCE~THALTEJ", "u": "SCIENCE", "v": "THALTEJ", "km": 4.346, "traffic": "medium", "oneway": false, "cost": null}, {"id": "SOLA~SOLACIV", "u": "SOLA", "v": "SOLACIV", "km": 0.734, "traffic": "low", "oneway": false, "cost": null}, {"id": "SOLA~THALTEJ", "u": "SOLA", "v": "THALTEJ", "km": 3.198, "traffic": "high", "oneway": false, "cost": null}, {"id": "SOLA~DRIVEIN", "u": "SOLA", "v": "DRIVEIN", "km": 3.279, "traffic": "medium", "oneway": false, "cost": null}, {"id": "THALTEJ~ZYDUS", "u": "THALTEJ", "v": "ZYDUS", "km": 1.005, "traffic": "low", "oneway": false, "cost": null}, {"id": "THALTEJ~BODAK", "u": "THALTEJ", "v": "BODAK", "km": 1.487, "traffic": "medium", "oneway": false, "cost": null}, {"id": "THALTEJ~ISCON", "u": "THALTEJ", "v": "ISCON", "km": 3.414, "traffic": "medium", "oneway": false, "cost": null}, {"id": "DRIVEIN~SAL", "u": "DRIVEIN", "v": "SAL", "km": 1.39, "traffic": "low", "oneway": false, "cost": null}, {"id": "DRIVEIN~HELMET", "u": "DRIVEIN", "v": "HELMET", "km": 1.868, "traffic": "medium", "oneway": false, "cost": null}, {"id": "DRIVEIN~BODAK", "u": "DRIVEIN", "v": "BODAK", "km": 2.481, "traffic": "low", "oneway": false, "cost": null}, {"id": "ZYDUS~BODAK", "u": "ZYDUS", "v": "BODAK", "km": 2.449, "traffic": "medium", "oneway": false, "cost": null}, {"id": "BODAK~VASTRA", "u": "BODAK", "v": "VASTRA", "km": 1.718, "traffic": "medium", "oneway": false, "cost": null}, {"id": "HELMET~STERL", "u": "HELMET", "v": "STERL", "km": 1.127, "traffic": "low", "oneway": false, "cost": null}, {"id": "HELMET~VIJAY", "u": "HELMET", "v": "VIJAY", "km": 1.835, "traffic": "high", "oneway": false, "cost": null}, {"id": "VASTRA~STERL", "u": "VASTRA", "v": "STERL", "km": 2.006, "traffic": "medium", "oneway": false, "cost": null}, {"id": "VASTRA~SHIVR", "u": "VASTRA", "v": "SHIVR", "km": 2.129, "traffic": "high", "oneway": false, "cost": null}, {"id": "ISCON~SHIVR", "u": "ISCON", "v": "SHIVR", "km": 3.069, "traffic": "medium", "oneway": false, "cost": null}, {"id": "SHIVR~PANJRA", "u": "SHIVR", "v": "PANJRA", "km": 2.414, "traffic": "medium", "oneway": false, "cost": null}, {"id": "PANJRA~VIJAY", "u": "PANJRA", "v": "VIJAY", "km": 2.093, "traffic": "medium", "oneway": false, "cost": null}, {"id": "PANJRA~PALDI", "u": "PANJRA", "v": "PALDI", "km": 2.97, "traffic": "medium", "oneway": false, "cost": null}, {"id": "VIJAY~NAVRANG", "u": "VIJAY", "v": "NAVRANG", "km": 1.211, "traffic": "medium", "oneway": false, "cost": null}, {"id": "NAVRANG~VSH", "u": "NAVRANG", "v": "VSH", "km": 2.497, "traffic": "high", "oneway": false, "cost": null}, {"id": "PALDI~VSH", "u": "PALDI", "v": "VSH", "km": 2.108, "traffic": "low", "oneway": false, "cost": null}], "scenarios": [{"id": "normal", "title": "Normal", "description": "Every road has a positive travel time, so Dijkstra is safe to use.", "src": "GOTA", "dst": "ZYDUS", "roads": {}}, {"id": "negative-road", "title": "Negative road", "description": "Science City to Sola Bridge becomes a one-way road with a cost of \u22126 min. Dijkstra gives a wrong answer here.", "src": "GOTA", "dst": "ZYDUS", "roads": {"SCIENCE~SOLA": {"oneway": true, "cost": -6}}}, {"id": "negative-cycle", "title": "Negative cycle", "description": "Science City and Sola Bridge are joined by a two-way road costing \u22126 min, so going back and forth lowers the cost forever.", "src": "GOTA", "dst": "ZYDUS", "roads": {"SCIENCE~SOLA": {"cost": -6}}}], "map": {"bounds": {"north": 23.1135, "south": 23.004, "west": 72.4835, "east": 72.589}, "river": [[23.12, 72.5935], [23.1, 72.59], [23.08, 72.5875], [23.062, 72.585], [23.048, 72.5815], [23.036, 72.5785], [23.024, 72.577], [23.012, 72.5762], [23.0, 72.5755]], "river_name": "Sabarmati", "lakes": [{"name": "Vastrapur Lake", "lat": 23.0378, "lon": 72.5318, "rx_m": 300, "ry_m": 220}]}, "server": false}</script>
+<script>
+"use strict";
+// ENGINE START
+// In-browser copy of engine.py. It produces exactly the same trace as the
+// Python version and is used when the page runs without the Flask server.
+const Engine = (() => {
+  const ALGORITHMS = ["auto", "dijkstra", "bellman-ford"];
+  function minutes(km, traffic, speeds) {
+    return traffic === "closed" ? null : km / speeds[traffic] * 60;
+  }
+  function scenarioRoads(city, scenario) {
+    if (scenario === null || scenario === undefined || scenario === "") return {};
+    const s = city.scenarios.find(x => x.id === scenario);
+    if (!s) throw new Error("Unknown scenario: " + scenario);
+    return s.roads;
+  }
+  function buildAdjacency(city, trafficOverrides, roadOverrides) {
+    trafficOverrides = trafficOverrides || {};
+    roadOverrides = roadOverrides || {};
+    const adj = {};
+    for (const n of city.nodes) adj[n.id] = [];
+    for (const e of city.edges) {
+      const ro = roadOverrides[e.id] || {};
+      const traffic = trafficOverrides[e.id] !== undefined ? trafficOverrides[e.id] : e.traffic;
+      if (traffic === "closed") continue;
+      const cost = ro.cost !== undefined ? ro.cost : e.cost;
+      const oneway = ro.oneway !== undefined ? ro.oneway : e.oneway;
+      const w = cost !== null && cost !== undefined ? cost : minutes(e.km, traffic, city.speeds);
+      adj[e.u].push([e.v, w, e.km, e.id]);
+      if (!oneway) adj[e.v].push([e.u, w, e.km, e.id]);
+    }
+    return adj;
+  }
+  function negativeEdges(adj) {
+    const out = [];
+    for (const u in adj) for (const [v, w, , eid] of adj[u]) if (w < 0) out.push({ u: u, v: v, w: w, edge: eid });
+    return out;
+  }
+  // Binary min-heap ordered by (cost, node id), same order as Python's heapq on tuples
+  const less = (a, b) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+  function heapPush(h, x) {
+    h.push(x);
+    let i = h.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (!less(h[i], h[p])) break;
+      [h[i], h[p]] = [h[p], h[i]];
+      i = p;
+    }
+  }
+  function heapPop(h) {
+    const top = h[0], last = h.pop();
+    if (h.length) {
+      h[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1, r = l + 1;
+        let m = i;
+        if (l < h.length && less(h[l], h[m])) m = l;
+        if (r < h.length && less(h[r], h[m])) m = r;
+        if (m === i) break;
+        [h[i], h[m]] = [h[m], h[i]];
+        i = m;
+      }
+    }
+    return top;
+  }
+  function dijkstraTrace(adj, src, targets) {
+    const dist = {}, parent = {}, fin = new Set();
+    for (const v in adj) { dist[v] = Infinity; parent[v] = null; }
+    dist[src] = 0;
+    const heap = [[0, src]];
+    const events = [{ type: "init", node: src }];
+    let reached = null;
+    while (heap.length) {
+      const [d, u] = heapPop(heap);
+      if (fin.has(u)) { events.push({ type: "stale", node: u, d: d, final: dist[u] }); continue; }
+      fin.add(u);
+      events.push({ type: "pop", node: u, d: d });
+      if (targets.has(u)) { events.push({ type: "found", node: u, d: d }); reached = u; break; }
+      for (const [v, w, , eid] of adj[u]) {
+        const nw = d + w, old = dist[v];
+        const result = fin.has(v) ? "final" : (nw < old ? "update" : "reject");
+        events.push({ type: "relax", u: u, v: v, edge: eid, w: w, du: d,
+          old: old === Infinity ? null : old, new: nw, oldParent: parent[v], result: result });
+        if (result === "update") { dist[v] = nw; parent[v] = u; heapPush(heap, [nw, v]); }
+      }
+    }
+    if (reached === null) events.push({ type: "empty" });
+    return { events, dist, parent, reached };
+  }
+  function bellmanFordTrace(adj, src, targets) {
+    const order = Object.keys(adj), n = order.length;
+    const dist = {}, parent = {};
+    for (const v of order) { dist[v] = Infinity; parent[v] = null; }
+    dist[src] = 0;
+    const edges = [];
+    for (const u of order) for (const [v, w, , eid] of adj[u]) edges.push([u, v, w, eid]);
+    const events = [{ type: "init", node: src }];
+    for (let p = 1; p < n; p++) {
+      events.push({ type: "bf_pass", pass: p, of: n - 1 });
+      let changes = 0;
+      for (const [u, v, w, eid] of edges) {
+        if (dist[u] === Infinity) continue;
+        const du = dist[u], nw = du + w, old = dist[v];
+        const result = nw < old ? "update" : "reject";
+        events.push({ type: "relax", u: u, v: v, edge: eid, w: w, du: du,
+          old: old === Infinity ? null : old, new: nw, oldParent: parent[v], result: result, pass: p });
+        if (result === "update") { dist[v] = nw; parent[v] = u; changes++; }
+      }
+      events.push({ type: "bf_pass_done", pass: p, changes: changes });
+      if (changes === 0) { events.push({ type: "early_exit", pass: p }); break; }
+    }
+    events.push({ type: "cycle_check" });
+    const relaxable = edges.filter(([u, v, w]) => dist[u] !== Infinity && dist[u] + w < dist[v]).map(([u, v]) => [u, v]);
+    let cycle = null, affected = [];
+    if (relaxable.length) {
+      const [u0, v0] = relaxable[0];
+      const par = Object.assign({}, parent);
+      par[v0] = u0;
+      let x = v0;
+      for (let i = 0; i < n; i++) x = par[x];
+      const loop = [x];
+      let y = par[x];
+      while (y !== x) { loop.push(y); y = par[y]; }
+      loop.reverse();
+      let first = 0;
+      for (let i = 1; i < loop.length; i++) if (order.indexOf(loop[i]) < order.indexOf(loop[first])) first = i;
+      cycle = loop.slice(first).concat(loop.slice(0, first));
+      let cost = 0;
+      for (let i = 0; i < cycle.length; i++) {
+        const a = cycle[i], b = cycle[(i + 1) % cycle.length];
+        cost += Math.min(...adj[a].filter(x2 => x2[0] === b).map(x2 => x2[1]));
+      }
+      const start = relaxable.map(r => r[1]).concat(cycle);
+      const seen = new Set(start), stack = start.slice();
+      while (stack.length) {
+        const a = stack.pop();
+        for (const [b] of adj[a]) if (!seen.has(b)) { seen.add(b); stack.push(b); }
+      }
+      affected = order.filter(v => seen.has(v));
+      events.push({ type: "cycle_found", cycle: cycle, u: u0, v: v0, cost: cost, affected: affected });
+    }
+    const aff = new Set(affected);
+    let reached = null;
+    if (![...targets].some(t => aff.has(t))) {
+      for (const t of order) {
+        if (targets.has(t) && dist[t] !== Infinity && (reached === null || dist[t] < dist[reached])) reached = t;
+      }
+    }
+    events.push({ type: "done", node: reached, d: reached ? dist[reached] : null });
+    return { events, dist, parent, cycle, affected, reached };
+  }
+  function reconstructPath(parent, src, dst) {
+    const path = [], limit = Object.keys(parent).length;
+    for (let c = dst; c !== null && c !== undefined && path.length <= limit; c = parent[c]) path.push(c);
+    path.reverse();
+    return path.length && path[0] === src ? path : [];
+  }
+  function cmpPath(a, b) {
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+    }
+    return a.length - b.length;
+  }
+  function allRoutes(adj, src, dst, cap) {
+    cap = cap || 20000;
+    const found = [], seen = new Set([src]), path = [src];
+    (function dfs(u, cost, km) {
+      if (found.length >= cap) return;
+      if (u === dst) { found.push({ path: path.slice(), cost: cost, km: km }); return; }
+      for (const [v, w, k] of adj[u]) {
+        if (seen.has(v)) continue;
+        seen.add(v); path.push(v);
+        dfs(v, cost + w, km + k);
+        path.pop(); seen.delete(v);
+      }
+    })(src, 0, 0);
+    found.sort((a, b) => (a.cost - b.cost) || cmpPath(a.path, b.path));
+    return found;
+  }
+  function pathKm(adj, path) {
+    let total = 0;
+    for (let i = 0; i + 1 < path.length; i++) total += adj[path[i]].find(x => x[0] === path[i + 1])[2];
+    return total;
+  }
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const fmt = x => x.toFixed(1).replace("-", "−");
+  function findRoute(city, src, dst, trafficOverrides, opts) {
+    opts = opts || {};
+    const altCount = opts.altCount || 4;
+    const scenario = opts.scenario || null;
+    const algorithm = opts.algorithm || "auto";
+    const names = {};
+    city.nodes.forEach(n => { names[n.id] = n.name; });
+    if (!(src in names)) throw new Error("Unknown start point: " + src);
+    const nearest = dst === "NEAREST";
+    if (!nearest && !(dst in names)) throw new Error("Unknown destination: " + dst);
+    if (!ALGORITHMS.includes(algorithm)) throw new Error(`Unknown algorithm: ${algorithm}. Use one of: ${ALGORITHMS.join(", ")}`);
+    const roads = scenarioRoads(city, scenario);
+    const adj = buildAdjacency(city, trafficOverrides, roads);
+    const targets = new Set(nearest
+      ? city.nodes.filter(n => n.type === "hospital" && n.id !== src).map(n => n.id)
+      : [dst]);
+    const neg = negativeEdges(adj);
+    const use = algorithm === "dijkstra" || (algorithm === "auto" && !neg.length) ? "dijkstra" : "bellman-ford";
+    const dj = (use === "dijkstra" || neg.length) ? dijkstraTrace(adj, src, targets) : null;
+    const bf = (use === "bellman-ford" || neg.length) ? bellmanFordTrace(adj, src, targets) : null;
+    const main = use === "dijkstra" ? dj : bf;
+    const { events, dist, parent, reached } = main;
+    const cycle = use === "dijkstra" ? null : bf.cycle;
+    const affected = use === "dijkstra" ? [] : bf.affected;
+    const unreliable = neg.length > 0 && use === "dijkstra";
+    const path = reached ? reconstructPath(parent, src, reached) : [];
+
+    let alternatives = [], totalRoutes = 0, shortestKm = null;
+    if (reached) {
+      const routes = allRoutes(adj, src, reached);
+      totalRoutes = routes.length;
+      alternatives = routes.filter(r => !same(r.path, path)).slice(0, altCount);
+      const key = r => Math.round(r.km * 1e6) / 1e6;
+      for (const r of routes) {
+        if (!shortestKm || key(r) < key(shortestKm) || (key(r) === key(shortestKm) && r.cost < shortestKm.cost)) shortestKm = r;
+      }
+      if (shortestKm && !same(shortestKm.path, path) && !alternatives.some(a => same(a.path, shortestKm.path))) alternatives.push(shortestKm);
+    }
+
+    let dijkstraCheck = null, bellmanFordCheck = null;
+    if (neg.length) {
+      const djCost = dj.reached ? dj.dist[dj.reached] : null;
+      const bfCost = bf.reached ? bf.dist[bf.reached] : null;
+      const wrong = (dj.reached !== bf.reached) || (djCost !== null && bfCost !== null && Math.abs(djCost - bfCost) > 1e-9);
+      const ws = dj.events.findIndex(e => e.type === "relax" && e.result === "final" && e.new < e.old);
+      dijkstraCheck = { cost: djCost, dst: dj.reached, path: dj.reached ? reconstructPath(dj.parent, src, dj.reached) : [],
+        wrong: wrong, wrongStep: ws < 0 ? null : ws };
+      bellmanFordCheck = { cost: bfCost, dst: bf.reached, path: bf.reached ? reconstructPath(bf.parent, src, bf.reached) : [],
+        negativeCycle: bf.cycle };
+    }
+
+    let warning = null;
+    if (neg.length) {
+      const seenE = new Set(), listed = [];
+      for (const e of neg) {
+        if (!seenE.has(e.edge)) { seenE.add(e.edge); listed.push(`${names[e.u]} → ${names[e.v]} (${fmt(e.w)} min)`); }
+      }
+      const roadsText = listed.join(", ");
+      const target = nearest ? "the hospitals" : names[dst];
+      const bfCycle = bellmanFordCheck.negativeCycle;
+      if (use === "dijkstra") {
+        const verdict = dijkstraCheck.wrong ? "is wrong" : "happens to be right here";
+        warning = `Dijkstra was run on a map with a negative road: ${roadsText}. Its answer ${verdict}, because it never revisits a place once it is final.`;
+      } else if (bfCycle && !reached) {
+        const loop = bfCycle.concat(bfCycle.slice(0, 1)).map(c => names[c]).join(" → ");
+        const cycCost = events.find(e => e.type === "cycle_found").cost;
+        warning = `Negative cycle: ${loop} adds up to ${fmt(cycCost)} min. Every lap lowers the cost, so there is no shortest path to ${target}.`;
+      } else if (bfCycle) {
+        const loop = bfCycle.concat(bfCycle.slice(0, 1)).map(c => names[c]).join(" → ");
+        warning = `There is a negative cycle (${loop}), but it can't reach ${names[reached]}, so the route there is still well defined.`;
+      } else {
+        warning = `This map has a road with a negative cost: ${roadsText}. Dijkstra can't be trusted here, so Bellman-Ford was used.`;
+      }
+    }
+
+    const cleanDist = {};
+    for (const k in dist) cleanDist[k] = dist[k] === Infinity ? null : dist[k];
+    return {
+      engine: "javascript", src: src, dst: reached, mode: nearest ? "nearest" : "hospital", requested: dst,
+      scenario: scenario || "normal", algorithm: use,
+      events: events, path: path, cost: reached ? dist[reached] : null, km: path.length ? pathKm(adj, path) : null,
+      dist: cleanDist, parent: parent, alternatives: alternatives, totalRoutes: totalRoutes,
+      shortestKmPath: shortestKm ? shortestKm.path : null,
+      negativeEdges: neg, negativeCycle: cycle, affected: affected, unreliable: unreliable, warning: warning,
+      dijkstraCheck: dijkstraCheck, bellmanFordCheck: bellmanFordCheck,
+    };
+  }
+  return { findRoute, buildAdjacency, scenarioRoads, minutes };
+})();
+// ENGINE END
+
+// ---------------------------------------------------------------------------
+// User interface
+// ---------------------------------------------------------------------------
+const CITY = JSON.parse(document.getElementById("city-data").textContent);
+const SERVER = !!CITY.server;
+const $ = s => document.querySelector(s);
+const SVGNS = "http://www.w3.org/2000/svg";
+function svgEl(tag, attrs, parent) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in (attrs || {})) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const NODES = CITY.nodes, NODE = {}, EDGE = {};
+NODES.forEach(n => { NODE[n.id] = n; });
+CITY.edges.forEach(e => { EDGE[e.id] = e; });
+const V = NODES.length;
+const nm = id => NODE[id].name;
+const sh = id => NODE[id].short;
+const minus = s => s.replace("-", "−");
+const f2 = x => minus(x.toFixed(2));
+const f1 = x => minus(x.toFixed(1));
+const sumText = (du, w, nw) => w < 0 ? `${f2(du)} − ${f2(-w)} = ${f2(nw)}` : `${f2(du)} + ${f2(w)} = ${f2(nw)}`;
+const LEVELS = ["low", "medium", "high", "closed"];
+const LEVEL_TEXT = { low: "low traffic", medium: "medium traffic", high: "heavy traffic", closed: "closed" };
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const S = { src: "GOTA", dst: "ZYDUS", scenario: "normal", force: null, overrides: {}, res: null, frames: [], step: 0,
+            playing: false, timer: null, hoverAlt: null, pinAlt: null, drive: null, idx: null, showCosts: false, hoverEdge: null };
+
+// ---------- projection ----------
+const BND = CITY.map.bounds, K = 10000;
+const COS = Math.cos((BND.north + BND.south) / 2 * Math.PI / 180);
+const px = lon => (lon - BND.west) * COS * K;
+const py = lat => (BND.north - lat) * K;
+const W = px(BND.east), H = py(BND.south);
+const M_PER_UNIT = 111320 / K;
+const P = {};
+NODES.forEach(n => { P[n.id] = [px(n.lon), py(n.lat)]; });
+const R = 17;
+
+const svg = $("#map");
+svg.setAttribute("viewBox", `0 0 ${W.toFixed(1)} ${H.toFixed(1)}`);
+const defs = svgEl("defs", {}, svg);
+for (const k of ["accept", "reject", "skip", "ink"]) {
+  const m = svgEl("marker", { id: "arr-" + k, viewBox: "0 0 10 10", refX: "5", refY: "5", markerWidth: "4.5", markerHeight: "4.5", orient: "auto" }, defs);
+  svgEl("path", { d: "M0 0 L10 5 L0 10 z", class: "arrow-" + k }, m);
+}
+const L = {};
+["bg", "roads", "tree", "dropped", "alt", "casing", "route", "cycle", "active", "elabels", "nodes", "amb"].forEach(k => { L[k] = svgEl("g", {}, svg); });
+
+// ---------- static background ----------
+(function drawBackground() {
+  svgEl("rect", { x: 0, y: 0, width: W, height: H, class: "land" }, L.bg);
+  const km = 1000 / M_PER_UNIT;
+  for (let x = km; x < W; x += km) svgEl("line", { x1: x, y1: 0, x2: x, y2: H, class: "gridline" }, L.bg);
+  for (let y = km; y < H; y += km) svgEl("line", { x1: 0, y1: y, x2: W, y2: y, class: "gridline" }, L.bg);
+  const river = CITY.map.river.map(([la, lo]) => [px(lo), py(la)]);
+  svgEl("polyline", { points: river.map(p => p.join(",")).join(" "), class: "river" }, L.bg);
+  const a = river[2], b = river[3];
+  const ang = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI;
+  const t = svgEl("text", { class: "water-label", "text-anchor": "middle", transform: `translate(${(a[0] + b[0]) / 2 - 24},${(a[1] + b[1]) / 2}) rotate(${ang})` }, L.bg);
+  t.textContent = CITY.map.river_name;
+  for (const lk of CITY.map.lakes) svgEl("ellipse", { cx: px(lk.lon), cy: py(lk.lat), rx: lk.rx_m / M_PER_UNIT, ry: lk.ry_m / M_PER_UNIT, class: "lake" }, L.bg);
+  const sx = 28, sy = H - 30;
+  svgEl("path", { d: `M${sx} ${sy - 7} V${sy} H${sx + km} V${sy - 7}`, class: "scalebar" }, L.bg);
+  const st = svgEl("text", { x: sx + km / 2, y: sy - 11, class: "map-note", "text-anchor": "middle" }, L.bg);
+  st.textContent = "1 km";
+  const n = svgEl("g", { class: "north", transform: `translate(${W - 36},40)` }, L.bg);
+  svgEl("path", { d: "M0 -18 L7 6 L0 1 L-7 6 z" }, n);
+  const nt = svgEl("text", { y: 24 }, n); nt.textContent = "N";
+  const note = svgEl("text", { x: W - 16, y: H - 16, class: "map-note", "text-anchor": "end" }, L.bg);
+  note.textContent = CITY.city;
+})();
+
+// ---------- road state (traffic + mode) ----------
+function modeRoads() { return Engine.scenarioRoads(CITY, S.scenario); }
+function roadInfo(e) {
+  const ro = modeRoads()[e.id] || {};
+  const traffic = S.overrides[e.id] || e.traffic;
+  const cost = ro.cost !== undefined ? ro.cost : e.cost;
+  const oneway = ro.oneway !== undefined ? ro.oneway : e.oneway;
+  const fixed = cost !== null && cost !== undefined;
+  const w = traffic === "closed" ? null : (fixed ? cost : Engine.minutes(e.km, traffic, CITY.speeds));
+  return { traffic, cost: w, oneway, fixed, negative: w !== null && w < 0 };
+}
+
+// ---------- roads ----------
+const roadEls = {}, labelEls = {};
+for (const e of CITY.edges) {
+  const [x1, y1] = P[e.u], [x2, y2] = P[e.v];
+  const pts = `${x1},${y1} ${(x1 + x2) / 2},${(y1 + y2) / 2} ${x2},${y2}`;
+  const line = svgEl("polyline", { points: pts, class: "road" }, L.roads);
+  const hit = svgEl("polyline", { points: pts, class: "road-hit" }, L.roads);
+  hit.addEventListener("click", () => cycleTraffic(e.id));
+  hit.addEventListener("mouseenter", ev => { S.hoverEdge = e.id; line.classList.add("hover"); showRoadTip(e, ev); refreshLabelVisibility(); });
+  hit.addEventListener("mousemove", moveTip);
+  hit.addEventListener("mouseleave", () => { S.hoverEdge = null; line.classList.remove("hover"); hideTip(); refreshLabelVisibility(); });
+  roadEls[e.id] = line;
+  const len = Math.hypot(x2 - x1, y2 - y1);
+  const nudge = len < 90 ? 18 : 0;
+  const lx = (x1 + x2) / 2 - (y2 - y1) / len * nudge, ly = (y1 + y2) / 2 + (x2 - x1) / len * nudge;
+  const g = svgEl("g", { class: "elabel", transform: `translate(${lx},${ly})` }, L.elabels);
+  const r = svgEl("rect", { x: -18, y: -10, width: 36, height: 20, rx: 3 }, g);
+  const tx = svgEl("text", {}, g);
+  g.style.pointerEvents = "none";
+  labelEls[e.id] = { g, r, tx };
+}
+function refreshRoads() {
+  for (const e of CITY.edges) {
+    const info = roadInfo(e);
+    const el = roadEls[e.id];
+    let cls = "road t-" + info.traffic;
+    if (info.negative) cls += " neg";
+    if (el.classList.contains("hover")) cls += " hover";
+    el.setAttribute("class", cls);
+    if (info.oneway && info.traffic !== "closed") el.setAttribute("marker-mid", "url(#arr-ink)"); else el.removeAttribute("marker-mid");
+    const lab = labelEls[e.id];
+    const text = info.cost === null ? "closed" : f1(info.cost);
+    lab.tx.textContent = text;
+    const w = text.length * 7.4 + 12;
+    lab.r.setAttribute("x", -w / 2); lab.r.setAttribute("width", w);
+    lab.g.classList.toggle("neg", info.negative);
+  }
+  refreshLabelVisibility();
+}
+function refreshLabelVisibility() {
+  const f = S.frames[S.step], res = S.res;
+  const done = res && f && S.step === S.frames.length - 1 && res.path.length > 0;
+  const onRoute = new Set();
+  if (done) for (let i = 0; i + 1 < res.path.length; i++) {
+    const e = edgeBetween(res.path[i], res.path[i + 1]); if (e) onRoute.add(e.id);
+  }
+  const activeEdge = f && f.ev.type === "relax" ? f.ev.edge : null;
+  for (const e of CITY.edges) {
+    const info = roadInfo(e);
+    const show = S.showCosts || info.negative || e.id === activeEdge || e.id === S.hoverEdge || onRoute.has(e.id);
+    labelEls[e.id].g.style.display = show ? "" : "none";
+    labelEls[e.id].g.classList.toggle("hot", e.id === activeEdge);
+  }
+}
+function edgeBetween(a, b) {
+  return CITY.edges.find(e => (e.u === a && e.v === b) || (e.u === b && e.v === a));
+}
+
+// ---------- nodes ----------
+const LABEL_POS = {
+  n: [0, -R - 9, "middle"], s: [0, R + 19, "middle"], e: [R + 7, 5, "start"], w: [-R - 7, 5, "end"],
+  ne: [R - 3, -R - 3, "start"], nw: [-R + 3, -R - 3, "end"], se: [R - 3, R + 15, "start"], sw: [-R + 3, R + 15, "end"],
+};
+const nodeEls = {};
+for (const n of NODES) {
+  const [x, y] = P[n.id];
+  const g = svgEl("g", { class: "node", transform: `translate(${x},${y})`, tabindex: "0", role: "button" }, L.nodes);
+  g.setAttribute("aria-label", n.type === "hospital" ? `${n.name}: send the ambulance here` : `${n.name}: move the ambulance here`);
+  svgEl("circle", { r: R + 5, class: "ring" }, g);
+  if (n.type === "hospital") svgEl("rect", { x: -R + 1, y: -R + 1, width: 2 * R - 2, height: 2 * R - 2, rx: 3, class: "body" }, g);
+  else svgEl("circle", { r: R, class: "body" }, g);
+  const dist = svgEl("text", { class: "dist" }, g);
+  const [lx, ly, anchor] = LABEL_POS[n.label] || LABEL_POS.e;
+  const label = svgEl("text", { x: lx, y: ly, "text-anchor": anchor, class: "label" }, g);
+  g.addEventListener("click", () => nodeClicked(n.id));
+  g.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); nodeClicked(n.id); } });
+  g.addEventListener("mouseenter", ev => showNodeTip(n, ev));
+  g.addEventListener("mousemove", moveTip);
+  g.addEventListener("mouseleave", hideTip);
+  nodeEls[n.id] = { g, dist, label };
+}
+function refreshNodeLabels() {
+  const res = S.res, last = S.step === S.frames.length - 1;
+  for (const n of NODES) {
+    const lab = nodeEls[n.id].label;
+    lab.textContent = "";
+    let flag = null;
+    if (n.id === S.src) flag = "A";
+    else if (res && res.mode === "hospital" && n.id === res.requested) flag = "B";
+    else if (res && res.mode === "nearest" && last && n.id === res.dst) flag = "B";
+    if (flag) {
+      const t = svgEl("tspan", { class: flag === "A" ? "flag-a" : "flag-b" }, lab);
+      t.textContent = flag + " ";
+    }
+    lab.appendChild(document.createTextNode(n.short));
+  }
+}
+
+// ---------- ambulance (only shown while driving) ----------
+const ambG = svgEl("g", { class: "ambulance", display: "none" }, L.amb);
+const ambInner = svgEl("g", {}, ambG);
+svgEl("rect", { x: -20, y: -11, width: 26, height: 16, rx: 2, class: "amb-body" }, ambInner);
+svgEl("path", { d: "M6 -7 h7 l6 6 v6 h-13 z", class: "amb-body" }, ambInner);
+svgEl("rect", { x: -11, y: -7, width: 8, height: 2.5, class: "amb-mark" }, ambInner);
+svgEl("rect", { x: -8.25, y: -9.75, width: 2.5, height: 8, class: "amb-mark" }, ambInner);
+svgEl("circle", { cx: -12, cy: 6, r: 3, class: "amb-wheel" }, ambInner);
+svgEl("circle", { cx: 12, cy: 6, r: 3, class: "amb-wheel" }, ambInner);
+ambG.style.pointerEvents = "none";
+
+// ---------- tooltip, toast ----------
+const tip = $("#tip"), wrap = $("#mapWrap");
+function moveTip(ev) {
+  const r = wrap.getBoundingClientRect();
+  tip.style.left = (ev.clientX - r.left) + "px";
+  tip.style.top = (ev.clientY - r.top) + "px";
+}
+function showRoadTip(e, ev) {
+  const info = roadInfo(e);
+  let html = `<b>${esc(sh(e.u))} ${info.oneway ? "→" : "↔"} ${esc(sh(e.v))}</b><br>${e.km.toFixed(2)} km`;
+  if (info.cost === null) html += ", closed";
+  else if (info.fixed) html += `, cost fixed at ${f2(info.cost)} min by this mode`;
+  else html += `, ${LEVEL_TEXT[info.traffic]} (${CITY.speeds[info.traffic]} km/h), ${f2(info.cost)} min`;
+  if (info.oneway) html += "<br>One-way";
+  if (!info.fixed) html += "<br>Click to change traffic";
+  tip.innerHTML = html; tip.hidden = false; moveTip(ev);
+}
+function showNodeTip(n, ev) {
+  const f = S.frames[S.step];
+  const d = f ? f.dist[n.id] : Infinity;
+  const cost = f && f.aff.has(n.id) ? "−∞ (no shortest path)" : d === Infinity ? "∞" : f2(d) + " min";
+  tip.innerHTML = `<b>${esc(n.name)}</b><br>${n.type === "hospital" ? "Hospital" : "Junction"}, cost at this step: ${cost}<br>${n.type === "hospital" ? "Click to send the ambulance here" : "Click to move the ambulance here"}`;
+  tip.hidden = false; moveTip(ev);
+}
+function hideTip() { tip.hidden = true; }
+let toastTimer = null;
+function toast(msg) {
+  const t = $("#toast");
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
+}
+
+// ---------- controls ----------
+const srcSel = $("#srcSel"), dstSel = $("#dstSel"), modeSel = $("#modeSel");
+(function fillSelects() {
+  for (const [label, type] of [["Junctions", "junction"], ["Hospitals", "hospital"]]) {
+    const og = document.createElement("optgroup"); og.label = label;
+    NODES.filter(n => n.type === type).forEach(n => og.appendChild(new Option(n.name, n.id)));
+    srcSel.appendChild(og);
+  }
+  dstSel.appendChild(new Option("Nearest hospital", "NEAREST"));
+  NODES.filter(n => n.type === "hospital").forEach(n => dstSel.appendChild(new Option(n.name, n.id)));
+  CITY.scenarios.forEach(s => modeSel.appendChild(new Option(s.title, s.id)));
+})();
+function syncSelects() {
+  srcSel.value = S.src; dstSel.value = S.dst; modeSel.value = S.scenario;
+  for (const o of dstSel.options) o.disabled = o.value === S.src;
+}
+$("#controls").addEventListener("submit", ev => {
+  ev.preventDefault();
+  S.src = srcSel.value; S.dst = dstSel.value;
+  if (S.dst === S.src) S.dst = "NEAREST";
+  S.force = null;
+  compute({ fromStart: true, play: true });
+});
+srcSel.addEventListener("change", () => { S.src = srcSel.value; if (S.dst === S.src) S.dst = "NEAREST"; syncSelects(); });
+dstSel.addEventListener("change", () => { S.dst = dstSel.value; });
+modeSel.addEventListener("change", () => {
+  const sc = CITY.scenarios.find(s => s.id === modeSel.value);
+  S.scenario = sc.id; S.src = sc.src; S.dst = sc.dst; S.overrides = {}; S.force = null;
+  syncSelects(); refreshRoads();
+  compute({ fromStart: false });
+  toast(sc.description);
+});
+$("#resetTraffic").addEventListener("click", () => {
+  if (!Object.keys(S.overrides).length) { toast("Traffic is already at its normal levels."); return; }
+  S.overrides = {}; refreshRoads(); compute({ fromStart: false });
+  toast("Traffic reset. Route recalculated.");
+});
+$("#costToggle").addEventListener("change", ev => { S.showCosts = ev.target.checked; refreshLabelVisibility(); });
+
+function nodeClicked(id) {
+  if (NODE[id].type === "hospital") {
+    if (id === S.src) { toast(`The ambulance is already at ${nm(id)}.`); return; }
+    S.dst = id;
+  } else {
+    S.src = id;
+    if (S.dst === S.src) S.dst = "NEAREST";
+  }
+  syncSelects();
+  compute({ fromStart: true, play: true });
+}
+function cycleTraffic(id) {
+  const e = EDGE[id], info = roadInfo(e);
+  if (info.fixed) {
+    toast(`This road's cost is fixed at ${f1(info.cost)} min in the ${modeSel.options[modeSel.selectedIndex].text} mode.`);
+    return;
+  }
+  const next = LEVELS[(LEVELS.indexOf(info.traffic) + 1) % LEVELS.length];
+  if (next === e.traffic) delete S.overrides[id]; else S.overrides[id] = next;
+  refreshRoads();
+  const now = roadInfo(e);
+  toast(`${sh(e.u)} to ${sh(e.v)}: ${next === "closed" ? "closed" : `${LEVEL_TEXT[next]}, ${f1(now.cost)} min`}. Route recalculated.`);
+  compute({ fromStart: false });
+}
+
+// ---------- computing ----------
+async function compute(opts) {
+  opts = opts || {};
+  stopPlay(); stopDrive();
+  const algorithm = S.force || "auto";
+  let res;
+  if (SERVER) {
+    try {
+      const r = await fetch("/api/route", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ src: S.src, dst: S.dst, traffic: S.overrides, scenario: S.scenario, algorithm }) });
+      res = await r.json();
+      if (!r.ok) throw new Error(res.error || r.statusText);
+    } catch (err) {
+      toast("The Python server didn't answer, so the in-browser engine was used.");
+      res = Engine.findRoute(CITY, S.src, S.dst, S.overrides, { scenario: S.scenario, algorithm });
+    }
+  } else {
+    res = Engine.findRoute(CITY, S.src, S.dst, S.overrides, { scenario: S.scenario, algorithm });
+  }
+  S.res = res; S.hoverAlt = null; S.pinAlt = null;
+  S.frames = buildFrames(res);
+  indexFrames();
+  $("#scrub").max = S.frames.length - 1;
+  renderNotice(); renderLegend(); renderResult(); renderCompare(); renderRoutes();
+  let k = opts.fromStart ? 0 : S.frames.length - 1;
+  if (opts.jump === "wrong" && res.dijkstraCheck && res.dijkstraCheck.wrongStep !== null) k = res.dijkstraCheck.wrongStep;
+  goTo(k);
+  if (opts.play) play();
+}
+
+// Replay the event list into one snapshot per step, so stepping backwards is free.
+function buildFrames(res) {
+  const dij = res.algorithm === "dijkstra";
+  const dist = {}, parent = {}, fin = new Set();
+  let heap = [], aff = new Set(), pass = 0, cycle = null;
+  NODES.forEach(n => { dist[n.id] = Infinity; parent[n.id] = null; });
+  const frames = [];
+  const st = { checked: 0, ignored: 0, replaced: 0, kept: 0 };
+  for (const ev of res.events) {
+    switch (ev.type) {
+      case "init": dist[ev.node] = 0; if (dij) heap.push({ d: 0, node: ev.node }); break;
+      case "pop": case "stale": {
+        const i = heap.findIndex(h => h.node === ev.node && h.d === ev.d);
+        if (i >= 0) heap.splice(i, 1);
+        if (ev.type === "pop") fin.add(ev.node);
+        break;
+      }
+      case "relax":
+        st.checked++;
+        if (ev.result === "update") {
+          dist[ev.v] = ev.new; parent[ev.v] = ev.u;
+          if (dij) heap.push({ d: ev.new, node: ev.v });
+          if (ev.old === null) st.kept++; else st.replaced++;
+        } else st.ignored++;
+        break;
+      case "bf_pass": pass = ev.pass; break;
+      case "cycle_found": aff = new Set(ev.affected); cycle = ev.cycle; break;
+      case "done": for (const v in dist) if (dist[v] !== Infinity && !aff.has(v)) fin.add(v); break;
+    }
+    if (dij) heap.sort((a, b) => a.d - b.d || (a.node < b.node ? -1 : 1));
+    frames.push({ ev, dist: { ...dist }, parent: { ...parent }, fin: new Set(fin), heap: heap.slice(), stats: { ...st }, pass, aff: new Set(aff), cycle });
+  }
+  return frames;
+}
+function indexFrames() {
+  const idx = { pop: {}, relax: {}, lastRelax: {}, end: S.frames.length - 1 };
+  S.frames.forEach((f, i) => {
+    const ev = f.ev;
+    if (ev.type === "pop") idx.pop[ev.node] = i;
+    if (ev.type === "relax") {
+      const key = ev.u + ">" + ev.v;
+      if (idx.relax[key] === undefined) idx.relax[key] = i;
+      idx.lastRelax[key] = i;
+    }
+  });
+  S.idx = idx;
+}
+
+// ---------- playback ----------
+function goTo(k) { S.step = Math.max(0, Math.min(k, S.frames.length - 1)); render(); }
+function play() {
+  if (S.step >= S.frames.length - 1) S.step = 0;
+  stopDrive();
+  S.playing = true; $("#playBtn").textContent = "Pause";
+  render(); tick();
+}
+function tick() {
+  clearTimeout(S.timer);
+  S.timer = setTimeout(() => {
+    if (!S.playing) return;
+    if (S.step < S.frames.length - 1) {
+      S.step++; render();
+      if (S.step === S.frames.length - 1) { stopPlay(); drive(); } else tick();
+    }
+  }, +$("#speed").value);
+}
+function stopPlay() { S.playing = false; clearTimeout(S.timer); $("#playBtn").textContent = "Play"; }
+$("#playBtn").addEventListener("click", () => S.playing ? stopPlay() : play());
+$("#nextBtn").addEventListener("click", () => { stopPlay(); stopDrive(); goTo(S.step + 1); });
+$("#prevBtn").addEventListener("click", () => { stopPlay(); stopDrive(); goTo(S.step - 1); });
+$("#firstBtn").addEventListener("click", () => { stopPlay(); stopDrive(); goTo(0); });
+$("#lastBtn").addEventListener("click", () => { stopPlay(); goTo(S.frames.length - 1); drive(); });
+$("#scrub").addEventListener("input", ev => { stopPlay(); stopDrive(); goTo(+ev.target.value); });
+$("#speed").addEventListener("change", () => { if (S.playing) tick(); });
+document.addEventListener("keydown", ev => {
+  if (ev.target.closest && ev.target.closest("select, input, textarea, button, [role=button], summary")) return;
+  if (ev.key === " ") { ev.preventDefault(); S.playing ? stopPlay() : play(); }
+  else if (ev.key === "ArrowRight") { stopPlay(); stopDrive(); goTo(S.step + 1); }
+  else if (ev.key === "ArrowLeft") { stopPlay(); stopDrive(); goTo(S.step - 1); }
+});
+for (const [btn, pane] of [["#tabCode", "#codePane"], ["#tabTable", "#tablePane"]]) {
+  $(btn).addEventListener("click", () => {
+    for (const [b2, p2] of [["#tabCode", "#codePane"], ["#tabTable", "#tablePane"]]) {
+      $(b2).setAttribute("aria-selected", String(b2 === btn));
+      $(p2).hidden = p2 !== pane;
+    }
+  });
+}
+
+// ---------- pseudocode ----------
+function codeLines(res) {
+  if (res.algorithm === "bellman-ford") return [
+    "dist[A] ← 0;  every other dist ← ∞",
+    "repeat V − 1 times:",
+    "    changed ← false",
+    "    for each road (u, v, w):",
+    "        if dist[u] + w < dist[v]:",
+    "            dist[v] ← dist[u] + w;  via[v] ← u;  changed ← true",
+    "        else: ignore this road",
+    "    if not changed: stop early",
+    "for each road (u, v, w):",
+    "    if dist[u] + w < dist[v]: negative cycle, no shortest path",
+    "route ← follow via[] back from B to A",
+  ];
+  return [
+    "if any road has w < 0: use Bellman-Ford instead",
+    "dist[A] ← 0;  every other dist ← ∞",
+    "push (0, A) into the priority queue",
+    "while the queue is not empty:",
+    "    (d, u) ← pop the smallest entry",
+    "    if u is already final: skip",
+    "    mark u as final",
+    res.mode === "nearest" ? "    if u is a hospital: stop" : "    if u is B: stop",
+    "    for each open road (u, v, w):",
+    "        if v is final: skip",
+    "        if d + w < dist[v]:",
+    "            dist[v] ← d + w;  via[v] ← u",
+    "            push (dist[v], v)",
+    "        else: ignore this road",
+    "route ← follow via[] back from B to A",
+  ];
+}
+function codeHighlight(res, ev) {
+  if (res.algorithm === "bellman-ford") {
+    const m = { init: [0], bf_pass: [1, 2], update: [3, 4, 5], reject: [3, 4, 6], bf_pass_done: [7], early_exit: [7], cycle_check: [8], cycle_found: [8, 9], done: [10] };
+    return m[ev.type === "relax" ? ev.result : ev.type] || [];
+  }
+  const m = { init: [1, 2], pop: [4, 6], stale: [4, 5], found: [7, 14], final: [8, 9], update: [8, 10, 11, 12], reject: [8, 10, 13], empty: [3] };
+  return m[ev.type === "relax" ? ev.result : ev.type] || [];
+}
+
+// ---------- explanations ----------
+const ok = s => `<span class="ok">${s}</span>`;
+const no = s => `<span class="no">${s}</span>`;
+function explain(f) {
+  const ev = f.ev, res = S.res, bf = res.algorithm === "bellman-ford";
+  const goal = res.mode === "nearest" ? "the nearest hospital" : nm(res.requested);
+  const target = res.mode === "nearest" ? "the hospitals" : nm(res.requested);
+  switch (ev.type) {
+    case "init":
+      return bf
+        ? { title: `Start at ${nm(ev.node)}`, text: `The ambulance is at ${nm(ev.node)}, so its cost is 0 min and every other place starts at ∞. Bellman-Ford has no priority queue. It checks every road in a fixed order and repeats that up to V − 1 = ${V - 1} times, because a shortest route never needs more than ${V - 1} roads.`, math: `dist[${esc(sh(ev.node))}] = 0, every other place = ∞` }
+        : { title: `Start at ${nm(ev.node)}`, text: `The ambulance is at ${nm(ev.node)}, so its cost is 0 min. Every other place starts at ∞ because no route to it is known yet. Goal: reach ${goal} as fast as possible.`, math: `dist[${esc(sh(ev.node))}] = 0, every other place = ∞` };
+    case "pop":
+      if (ev.d === 0) return { title: `${nm(ev.node)} leaves the queue first`, text: `${nm(ev.node)} is the only entry in the queue. It becomes final, and every road leaving it is checked next.`, math: `pop (0.00, ${esc(sh(ev.node))}), now final` };
+      return { title: `${nm(ev.node)} is final at ${f2(ev.d)} min`,
+        text: `${nm(ev.node)} has the smallest cost in the queue, so it leaves the queue and becomes final. Any other way to reach it would pass through a place that already costs more, and with no negative roads that can only add time.`,
+        math: `pop (${f2(ev.d)}, ${esc(sh(ev.node))}), now final` };
+    case "stale":
+      return { title: `Old queue entry for ${sh(ev.node)} skipped`,
+        text: `The queue hands back ${nm(ev.node)} at ${f2(ev.d)} min, but it is already final at ${f2(ev.final)} min. This entry was left over from before a cheaper route was found, so it is thrown away.`,
+        math: `${f2(ev.d)} > ${f2(ev.final)}, ${no("skip")}` };
+    case "found": {
+      const left = V - f.fin.size;
+      let text = res.mode === "nearest"
+        ? `${nm(ev.node)} is the first hospital to leave the queue, so it is the nearest one. `
+        : `${nm(ev.node)} just became final, so Dijkstra stops here. `;
+      if (res.unreliable) text += `On this map that answer can't be trusted: a road has a negative cost, and Dijkstra may already have skipped a cheaper route. `;
+      else if (left > 0) text += `${left} place${left > 1 ? "s were" : " was"} never finalized because the algorithm didn't need ${left > 1 ? "them" : "it"}. `;
+      text += `Following the via links back from ${sh(ev.node)} to ${sh(res.src)} gives the route.`;
+      return { title: res.unreliable ? `Dijkstra stops at ${nm(ev.node)}: ${f2(ev.d)} min` : `${nm(ev.node)} reached in ${f2(ev.d)} min`, text,
+        math: `${res.path.map(id => esc(sh(id))).join(" → ")} = ${f2(ev.d)} min` };
+    }
+    case "relax": {
+      const road = `Road ${sh(ev.u)} → ${sh(ev.v)} costs ${f2(ev.w)} min.`;
+      const sum = sumText(ev.du, ev.w, ev.new);
+      if (ev.result === "final" && ev.new < ev.old)
+        return { title: `Dijkstra misses a cheaper route to ${sh(ev.v)}`,
+          text: `${nm(ev.v)} was already final at ${f2(ev.old)} min. This ${roadInfo(EDGE[ev.edge]).oneway ? "one-way " : ""}road offers ${f2(ev.new)} min, but Dijkstra never revisits a final place, so it misses the cheaper route. This is why Dijkstra needs non-negative weights.`,
+          math: `${sum} < ${f2(ev.old)}, but ${esc(sh(ev.v))} is final: ${no("skipped")}` };
+      if (ev.result === "final")
+        return { title: `${sh(ev.v)} is already final`,
+          text: `${road} It leads to ${nm(ev.v)}, which is already final at ${f2(f.dist[ev.v])} min, so this road is skipped.`,
+          math: `${esc(sh(ev.v))} is final, skip` };
+      if (ev.result === "update" && ev.old === null)
+        return { title: `New route to ${sh(ev.v)}`,
+          text: `${road} Reaching ${nm(ev.v)} this way costs ${f2(ev.new)} min. No route to it was known yet, so it is recorded via ${sh(ev.u)}${bf ? "" : ` and ${sh(ev.v)} joins the queue`}.`,
+          math: `${sum} < ∞, ${ok("keep")}` };
+      if (ev.result === "update")
+        return { title: `Cheaper route to ${sh(ev.v)}`,
+          text: `${road} Reaching ${nm(ev.v)} this way costs ${f2(ev.new)} min. That beats the ${f2(ev.old)} min route via ${sh(ev.oldParent)}, so the more expensive route is dropped and ${sh(ev.v)} is now reached via ${sh(ev.u)}.`,
+          math: `${sum} < ${f2(ev.old)}, ${ok("replace")}` };
+      const via = f.parent[ev.v];
+      const tie = ev.new === ev.old;
+      return { title: `Road ${sh(ev.u)} → ${sh(ev.v)} ignored`,
+        text: `${road} Reaching ${nm(ev.v)} this way would cost ${f2(ev.new)} min, but it can already be reached in ${f2(ev.old)} min via ${sh(via)}. ` +
+          (tie ? "It's a tie, and the route found first is kept." : `This road would be ${f2(ev.new - ev.old)} min slower, so it is ignored.`),
+        math: `${sum} ≥ ${f2(ev.old)}, ${no("ignore")}` };
+    }
+    case "empty":
+      return { title: "No route", text: `The queue is empty and ${res.mode === "nearest" ? "no hospital" : nm(res.requested)} was reached. Every road that leads there is closed. Click a closed road on the map to open it again.`, math: "queue empty, no route" };
+    case "bf_pass":
+      return { title: `Pass ${ev.pass} of ${ev.of}`,
+        text: `Every road is checked once in this pass. After pass ${ev.pass}, every best route that uses ${ev.pass} road${ev.pass > 1 ? "s" : ""} or fewer has been found.`,
+        math: `pass ${ev.pass} of V − 1 = ${ev.of}` };
+    case "bf_pass_done":
+      return { title: `Pass ${ev.pass} finished`,
+        text: ev.changes > 0
+          ? `${ev.changes} cost${ev.changes > 1 ? "s" : ""} improved in this pass. ${ev.pass < V - 1 ? "Something changed, so another pass is needed." : "That was the last pass."}`
+          : `Nothing improved in this pass.`,
+        math: `${ev.changes} improvement${ev.changes === 1 ? "" : "s"}` };
+    case "early_exit":
+      return { title: "Nothing changed, so stop early",
+        text: `Pass ${ev.pass} improved nothing. Every later pass would see exactly the same costs, so Bellman-Ford stops here instead of running all ${V - 1} passes.`,
+        math: `0 improvements, stop after pass ${ev.pass}` };
+    case "cycle_check":
+      return { title: "Final check for a negative cycle",
+        text: `Bellman-Ford checks every road one more time. If any road can still lower a cost, the costs never settle, and that only happens with a negative cycle.`,
+        math: "for each road: is dist[u] + w < dist[v]?" };
+    case "cycle_found": {
+      const loop = ev.cycle.concat(ev.cycle.slice(0, 1)).map(sh).join(" → ");
+      return { title: "Negative cycle found",
+        text: `Road ${sh(ev.u)} → ${sh(ev.v)} can still lower a cost after ${V - 1} passes. The loop ${loop} adds up to ${f1(ev.cost)} min, so every lap makes the trip cheaper and the cost can drop forever. ${ev.affected.length} places, including ${target}, have no shortest path.`,
+        math: `${esc(loop)} = ${f1(ev.cost)} min per lap` };
+    }
+    case "done":
+      if (ev.node) return { title: `${nm(ev.node)} reached in ${f2(ev.d)} min`,
+        text: `${f.cycle ? `The negative cycle can't reach ${nm(ev.node)}, so its cost is still well defined. ` : `No road can lower any cost, so there is no negative cycle and every cost is final. `}Following the via links back from ${sh(ev.node)} gives the route.`,
+        math: `${res.path.map(id => esc(sh(id))).join(" → ")} = ${f2(ev.d)} min` };
+      if (f.cycle) return { title: "No shortest path", text: `Because of the negative cycle, Bellman-Ford reports that no shortest path to ${target} exists. Dijkstra can't detect this at all.`, math: "negative cycle, no answer" };
+      return { title: "No route", text: `${target} can't be reached: every road there is closed. Click a closed road on the map to open it again.`, math: "unreachable" };
+  }
+  return { title: "", text: "", math: "" };
+}
+
+// ---------- rendering ----------
+function trimmed(u, v, t1, t2) {
+  const [x1, y1] = P[u], [x2, y2] = P[v];
+  const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+  return [x1 + dx / len * t1, y1 + dy / len * t1, x2 - dx / len * t2, y2 - dy / len * t2];
+}
+function fmtNodeCost(d) {
+  if (d === Infinity) return "∞";
+  return Math.abs(d) >= 99.95 ? minus(String(Math.round(d))) : f1(d);
+}
+function render() {
+  const k = S.step, f = S.frames[k], ev = f.ev, res = S.res;
+  const last = k === S.frames.length - 1;
+  const done = last && res.path.length > 0;
+  const cur = ev.type === "relax" ? ev.u : (ev.node || null);
+  const tgt = ev.type === "relax" ? ev.v : null;
+  const tgtCls = ev.type === "relax" ? (ev.result === "update" ? "target-accept" : (ev.result === "reject" || ev.new < (ev.old ?? Infinity)) ? "target-reject" : "") : "";
+
+  for (const n of NODES) {
+    const d = f.dist[n.id];
+    const cls = ["node", n.type];
+    if (f.aff.has(n.id)) cls.push("affected");
+    else if (f.fin.has(n.id)) cls.push("final");
+    else if (d !== Infinity) cls.push("frontier");
+    if (n.id === cur && !last) cls.push("current");
+    if (n.id === tgt && tgtCls) cls.push(tgtCls);
+    if (done && res.path.includes(n.id)) cls.push("onroute");
+    nodeEls[n.id].g.setAttribute("class", cls.join(" "));
+    nodeEls[n.id].dist.textContent = f.aff.has(n.id) ? "−∞" : fmtNodeCost(d);
+  }
+  refreshNodeLabels();
+
+  L.tree.replaceChildren();
+  for (const v in f.parent) {
+    const p = f.parent[v];
+    if (p && !f.aff.has(v)) svgEl("line", { x1: P[p][0], y1: P[p][1], x2: P[v][0], y2: P[v][1], class: "tree" }, L.tree);
+  }
+  L.tree.style.opacity = done ? ".5" : "1";
+  L.dropped.replaceChildren(); L.active.replaceChildren(); L.cycle.replaceChildren();
+  if (ev.type === "relax") {
+    if (ev.result === "update" && ev.oldParent) {
+      svgEl("line", { x1: P[ev.oldParent][0], y1: P[ev.oldParent][1], x2: P[ev.v][0], y2: P[ev.v][1], class: "dropped" }, L.dropped);
+    }
+    const kind = ev.result === "update" ? "accept" : (ev.result === "reject" || ev.new < ev.old) ? "reject" : "skip";
+    const [x1, y1, x2, y2] = trimmed(ev.u, ev.v, R + 4, R + 9);
+    svgEl("line", { x1, y1, x2, y2, class: "active r-" + kind, "marker-end": `url(#arr-${kind})` }, L.active);
+  }
+  if (f.cycle) {
+    const pts = f.cycle.concat(f.cycle.slice(0, 1)).map(id => P[id].join(",")).join(" ");
+    svgEl("polyline", { points: pts, class: "cycle" }, L.cycle);
+  }
+  L.casing.replaceChildren(); L.route.replaceChildren();
+  if (done) {
+    const pts = res.path.map(id => P[id].join(",")).join(" ");
+    svgEl("polyline", { points: pts, class: "route-casing" }, L.casing);
+    svgEl("polyline", { points: pts, class: "route" }, L.route);
+  }
+  drawAlt();
+  refreshLabelVisibility();
+
+  const ex = explain(f);
+  $("#stepTitle").textContent = ex.title;
+  $("#stepText").textContent = ex.text;
+  $("#stepMath").innerHTML = ex.math;
+
+  const hl = new Set(codeHighlight(res, ev));
+  $("#code").innerHTML = codeLines(res).map((t, i) => `<span class="${hl.has(i) ? "on" : ""}"><i>${i + 1}</i>${esc(t)}</span>`).join("");
+
+  if (res.algorithm === "dijkstra") {
+    $("#queueTitle").textContent = "Priority queue";
+    $("#queueTitle").parentElement.hidden = false;
+    $("#queue").innerHTML = f.heap.length
+      ? f.heap.map((h, i) => {
+          const txt = `${esc(sh(h.node))} ${f2(h.d)}`;
+          if (h.d > f.dist[h.node]) return `<s title="Old entry: a cheaper route was found later">${txt}</s>`;
+          return i === 0 ? `<b>${txt}</b>` : txt;
+        }).join(", ")
+      : "Empty";
+  } else {
+    $("#queueTitle").parentElement.hidden = true;
+  }
+
+  const bf = res.algorithm === "bellman-ford";
+  const rows = NODES.map(n => {
+    const d = f.dist[n.id];
+    const st = f.aff.has(n.id) ? 1 : f.fin.has(n.id) ? 0 : d !== Infinity ? 1 : 2;
+    return { n, d, st };
+  }).sort((a, b) => a.st - b.st || (a.d - b.d) || (a.n.short < b.n.short ? -1 : 1));
+  $("#distBody").innerHTML = rows.map(r => {
+    const aff = f.aff.has(r.n.id);
+    const status = aff ? ["No shortest path", "st-affected"] : r.st === 0 ? ["Final", "st-final"] : r.st === 1 ? [bf ? "Has a cost" : "In queue", "st-frontier"] : ["Not reached", "st-unseen"];
+    const cost = aff ? "−∞" : r.d === Infinity ? "∞" : f2(r.d);
+    return `<tr class="${r.n.id === cur || r.n.id === tgt ? "cur" : ""}"><td>${esc(r.n.short)}${r.n.type === "hospital" ? " (hospital)" : ""}</td><td class="num">${cost}</td><td>${f.parent[r.n.id] ? esc(sh(f.parent[r.n.id])) : "–"}</td><td class="${status[1]}">${status[0]}</td></tr>`;
+  }).join("");
+
+  const passTxt = bf && f.pass ? ` · Pass ${f.pass} of ${V - 1}` : "";
+  $("#counter").textContent = `Step ${k + 1} of ${S.frames.length}${passTxt}`;
+  $("#scrub").value = k;
+  $("#prevBtn").disabled = k === 0;
+  $("#nextBtn").disabled = last;
+  if (!S.drive) ambG.setAttribute("display", "none");
+}
+
+// ---------- notice, legend ----------
+function renderNotice() {
+  const res = S.res, box = $("#notice");
+  if (!res.negativeEdges.length) { box.hidden = true; box.innerHTML = ""; return; }
+  const why = `<details><summary>Learn why</summary><p>Dijkstra treats a place as final the moment it leaves the queue and never looks at it again. That is safe only when no road has a negative cost, because then any later route can only add time. With a negative road, a later route can be cheaper, and Dijkstra misses it. Bellman-Ford makes no such assumption: it checks every road up to V − 1 times, which costs O(V·E) instead of O((V + E) log V), and it can detect a negative cycle.</p></details>`;
+  let msg;
+  if (res.algorithm === "dijkstra") msg = `<p class="notice-title">Dijkstra on a negative road${res.dijkstraCheck.wrong ? ": wrong answer" : ""}</p><div><button type="button" class="btn-text" id="backToBf">Back to Bellman-Ford</button></div>`;
+  else if (res.negativeCycle && !res.dst) msg = `<p class="notice-title">Negative cycle: no shortest path</p>`;
+  else msg = `<p class="notice-title">Negative road: using Bellman-Ford</p>`;
+  box.innerHTML = msg + why;
+  box.hidden = false;
+  const back = $("#backToBf");
+  if (back) back.addEventListener("click", () => { S.force = null; compute({ fromStart: false }); });
+}
+function swLine(color, dash, width) {
+  return `<svg width="26" height="10" aria-hidden="true"><line x1="2" y1="5" x2="24" y2="5" stroke="${color}" stroke-width="${width || 4}" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ""}/></svg>`;
+}
+function renderLegend() {
+  const bf = S.res && S.res.algorithm === "bellman-ford";
+  const neg = S.res && S.res.negativeEdges.length;
+  $("#legend").innerHTML = [
+    `<span>${swLine("var(--low)")}Low</span>`,
+    `<span>${swLine("var(--medium)")}Medium</span>`,
+    `<span>${swLine("var(--heavy)")}Heavy traffic</span>`,
+    `<span>${swLine("var(--closed)", "2 6")}Closed</span>`,
+    neg ? `<span>${swLine("var(--ink)", "5 4", 3)}Negative cost</span>` : "",
+    `<span><svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="var(--surface)" stroke="var(--line-strong)" stroke-width="2"/></svg>Junction</span>`,
+    `<span><svg width="14" height="14" aria-hidden="true"><rect x="1.5" y="1.5" width="11" height="11" rx="1.5" fill="var(--surface)" stroke="var(--line-strong)" stroke-width="2"/></svg>Hospital</span>`,
+    `<span><svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="5.5" fill="var(--surface)" stroke="var(--navy)" stroke-width="2.5"/></svg>${bf ? "Has a cost" : "In queue"}</span>`,
+    `<span><svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="var(--slate)"/></svg>Final</span>`,
+    `<span>${swLine("var(--tree)", "", 5)}Best known so far</span>`,
+    `<span>${swLine("var(--navy)", "", 5)}Chosen route</span>`,
+    `<span>${swLine("var(--ok)")}Road kept</span>`,
+    `<span>${swLine("var(--signal)", "6 4")}Road ignored</span>`,
+  ].join("");
+}
+
+// ---------- result ----------
+function relaxCount() { return S.frames.length ? S.frames[S.frames.length - 1].stats.checked : 0; }
+function renderResult() {
+  const res = S.res, box = $("#result");
+  if (!res.path.length) {
+    const why = res.negativeCycle ? esc(res.warning) : `Every road that leads to ${res.mode === "nearest" ? "a hospital" : esc(nm(res.requested))} from ${esc(nm(res.src))} is closed. Click a closed road on the map to open it.`;
+    box.innerHTML = `<h2>${res.negativeCycle ? "No shortest path exists" : "No route available"}</h2><p class="route-line">${why}</p>`;
+    return;
+  }
+  const title = res.unreliable
+    ? `Dijkstra's answer${res.dijkstraCheck.wrong ? " (wrong on this map)" : ""}`
+    : `Fastest route to ${esc(nm(res.dst))}${res.mode === "nearest" ? " (nearest)" : ""}`;
+  box.innerHTML = `
+    <h2>${title}</h2>
+    <p class="route-line">${res.path.map((id, i) => i === 0 || i === res.path.length - 1 ? `<b>${esc(sh(id))}</b>` : esc(sh(id))).join(" → ")}</p>
+    <dl class="figures">
+      <div><dt>Travel time</dt><dd>${f2(res.cost)} <small>min</small></dd></div>
+      <div><dt>Distance</dt><dd>${f2(res.km)} <small>km</small></dd></div>
+      <div><dt>Roads checked</dt><dd>${relaxCount()}</dd></div>
+    </dl>
+    <div class="result-actions">
+      <button type="button" class="btn btn-primary" id="driveBtn">Drive the route</button>
+      <button type="button" class="btn" id="replayBtn">Replay step by step</button>
+      <span id="driveStatus"></span>
+    </div>`;
+  $("#driveBtn").addEventListener("click", () => { stopPlay(); goTo(S.frames.length - 1); drive(); });
+  $("#replayBtn").addEventListener("click", () => {
+    stopDrive(); S.step = 0; play();
+    document.querySelector(".workspace").scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+  });
+}
+
+// ---------- Dijkstra vs Bellman-Ford ----------
+function renderCompare() {
+  const res = S.res, box = $("#compare");
+  if (!res.negativeEdges.length) { box.hidden = true; box.innerHTML = ""; return; }
+  const dj = res.dijkstraCheck, bfc = res.bellmanFordCheck;
+  const route = p => p.length ? p.map(id => esc(sh(id))).join(" → ") : "No route";
+  const viewingDij = res.algorithm === "dijkstra";
+  const btn = viewingDij
+    ? `<button type="button" class="btn" id="cmpBack">Back to Bellman-Ford</button>`
+    : `<button type="button" class="btn" id="cmpWrong">${dj.wrongStep !== null ? "Show where Dijkstra went wrong" : "Show Dijkstra's run"}</button>`;
+  box.innerHTML = `
+    <h2>Dijkstra vs Bellman-Ford</h2>
+    <table class="compare-table">
+      <thead><tr><th>Algorithm</th><th class="num">Answer</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td class="alg">Dijkstra<small>O((V+E) log V)</small></td><td class="num">${dj.cost !== null ? f2(dj.cost) + " min" : "No route"}</td><td class="${dj.wrong ? "verdict-bad" : ""}">${dj.wrong ? "Wrong" : "Right by luck"}</td></tr>
+        <tr><td class="alg">Bellman-Ford<small>O(V·E)</small></td><td class="num">${bfc.dst ? f2(bfc.cost) + " min" : "No answer"}</td><td class="verdict-good">${bfc.dst ? "Correct" : "Correct: negative cycle"}</td></tr>
+      </tbody>
+    </table>
+    <div>${btn}</div>`;
+  box.hidden = false;
+  const w = $("#cmpWrong"), b = $("#cmpBack");
+  if (w) w.addEventListener("click", async () => {
+    S.force = "dijkstra";
+    await compute({ fromStart: false, jump: "wrong" });
+    document.querySelector(".workspace").scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+  });
+  if (b) b.addEventListener("click", () => { S.force = null; compute({ fromStart: false }); });
+}
+
+// ---------- other routes: cost only ----------
+function renderRoutes() {
+  const res = S.res, body = $("#routesBody"), box = $("#routes");
+  if (!res.path.length) { body.innerHTML = ""; box.hidden = true; return; }
+  box.hidden = false;
+  $("#routesTitle").textContent = `Routes from ${sh(res.src)} to ${sh(res.dst)}`;
+  const route = p => p.map(id => esc(sh(id))).join(" → ");
+  let html = `<tr class="chosen"><td>${route(res.path)}</td><td class="num">${f2(res.cost)} min</td></tr>`;
+  res.alternatives.forEach((a, i) => {
+    html += `<tr data-i="${i}"><td>${route(a.path)}</td><td class="num">${f2(a.cost)} min</td></tr>`;
+  });
+  body.innerHTML = html;
+  body.querySelectorAll("tr[data-i]").forEach(tr => {
+    const i = +tr.dataset.i;
+    tr.addEventListener("mouseenter", () => { S.hoverAlt = i; drawAlt(); });
+    tr.addEventListener("mouseleave", () => { S.hoverAlt = null; drawAlt(); });
+  });
+}
+function drawAlt() {
+  L.alt.replaceChildren();
+  const i = S.hoverAlt !== null ? S.hoverAlt : S.pinAlt;
+  if (i === null || !S.res || !S.res.alternatives[i]) return;
+  const a = S.res.alternatives[i];
+  svgEl("polyline", { points: a.path.map(id => P[id].join(",")).join(" "), class: "alt-line" }, L.alt);
+}
+
+// ---------- driving animation ----------
+function drive() {
+  const res = S.res;
+  stopDrive();
+  if (!res.path.length) return;
+  const adj = Engine.buildAdjacency(CITY, S.overrides, modeRoads());
+  const segs = [];
+  let total = 0, anim = 0;
+  for (let i = 0; i + 1 < res.path.length; i++) {
+    const a = res.path[i], b = res.path[i + 1];
+    const w = adj[a].find(x => x[0] === b)[1];
+    const t = Math.max(w, 0.4);           // negative roads still need a moment on screen
+    segs.push({ a: P[a], b: P[b], t0: anim, t });
+    anim += t; total += w;
+  }
+  const status = () => $("#driveStatus");
+  const finish = () => {
+    const [x, y] = P[res.dst];
+    ambG.setAttribute("transform", `translate(${x},${y - 30})`);
+    ambInner.setAttribute("transform", "scale(1,1)");
+    S.drive = null;
+    if (status()) status().textContent = `Arrived at ${nm(res.dst)} after ${f2(total)} min.`;
+  };
+  ambG.setAttribute("display", "");
+  S.drive = { raf: 0 };
+  if (reducedMotion) { finish(); return; }
+  const dur = Math.min(9000, Math.max(3200, anim * 260));
+  const t0 = performance.now();
+  const step = now => {
+    const m = Math.min(1, (now - t0) / dur) * anim;
+    const s = segs.find(sg => m <= sg.t0 + sg.t) || segs[segs.length - 1];
+    const r = Math.min(1, (m - s.t0) / s.t);
+    const x = s.a[0] + (s.b[0] - s.a[0]) * r, y = s.a[1] + (s.b[1] - s.a[1]) * r;
+    ambG.setAttribute("transform", `translate(${x},${y})`);
+    ambInner.setAttribute("transform", `scale(${s.b[0] < s.a[0] ? -1 : 1},1)`);
+    if (status()) status().textContent = `Driving, slower on busy roads.`;
+    if (m >= anim) { finish(); return; }
+    S.drive.raf = requestAnimationFrame(step);
+  };
+  S.drive.raf = requestAnimationFrame(step);
+}
+function stopDrive() {
+  if (S.drive) cancelAnimationFrame(S.drive.raf);
+  S.drive = null;
+  ambG.setAttribute("display", "none");
+  const st = document.getElementById("driveStatus"); if (st) st.textContent = "";
+}
+
+// ---------- start ----------
+syncSelects();
+refreshRoads();
+compute({ fromStart: false });
+</script>
+
+</body>
+</html>
