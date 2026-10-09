@@ -1,0 +1,83 @@
+{
+  "city": "Ahmedabad (west)",
+  "road_factor": 1.3,
+  "speeds_kmph": { "low": 45, "medium": 28, "high": 14 },
+  "nodes": [
+    { "id": "GOTA",    "name": "Gota Circle",               "short": "Gota",        "lat": 23.1047, "lon": 72.5401, "type": "junction", "label": "e"  },
+    { "id": "SOLA",    "name": "Sola Bridge",               "short": "Sola Bridge", "lat": 23.0700, "lon": 72.5185, "type": "junction", "label": "e"  },
+    { "id": "SCIENCE", "name": "Science City Road",         "short": "Science City","lat": 23.0790, "lon": 72.4990, "type": "junction", "label": "w"  },
+    { "id": "THALTEJ", "name": "Thaltej Cross Road",        "short": "Thaltej",     "lat": 23.0501, "lon": 72.5080, "type": "junction", "label": "sw" },
+    { "id": "DRIVEIN", "name": "Drive-in Road",             "short": "Drive-in",    "lat": 23.0520, "lon": 72.5335, "type": "junction", "label": "ne" },
+    { "id": "HELMET",  "name": "Helmet Circle",             "short": "Helmet Circle","lat": 23.0530, "lon": 72.5475, "type": "junction", "label": "ne" },
+    { "id": "BODAK",   "name": "Judges Bungalow, Bodakdev", "short": "Bodakdev",    "lat": 23.0440, "lon": 72.5170, "type": "junction", "label": "s"  },
+    { "id": "VASTRA",  "name": "Vastrapur Lake",            "short": "Vastrapur",   "lat": 23.0396, "lon": 72.5290, "type": "junction", "label": "sw" },
+    { "id": "ISCON",   "name": "Iscon Cross Road",          "short": "Iscon",       "lat": 23.0265, "lon": 72.5070, "type": "junction", "label": "w"  },
+    { "id": "SHIVR",   "name": "Shivranjani Cross Road",    "short": "Shivranjani", "lat": 23.0249, "lon": 72.5300, "type": "junction", "label": "s"  },
+    { "id": "VIJAY",   "name": "Vijay Cross Road",          "short": "Vijay X Rd",  "lat": 23.0410, "lon": 72.5520, "type": "junction", "label": "ne" },
+    { "id": "PANJRA",  "name": "Panjrapole",                "short": "Panjrapole",  "lat": 23.0270, "lon": 72.5480, "type": "junction", "label": "sw" },
+    { "id": "NAVRANG", "name": "Navrangpura",               "short": "Navrangpura", "lat": 23.0370, "lon": 72.5600, "type": "junction", "label": "e"  },
+    { "id": "PALDI",   "name": "Paldi",                     "short": "Paldi",       "lat": 23.0110, "lon": 72.5620, "type": "junction", "label": "w"  },
+    { "id": "SOLACIV", "name": "GMERS Sola Civil Hospital", "short": "Sola Civil",  "lat": 23.0735, "lon": 72.5145, "type": "hospital", "label": "n"  },
+    { "id": "ZYDUS",   "name": "Zydus Hospital",            "short": "Zydus",       "lat": 23.0560, "lon": 72.5040, "type": "hospital", "label": "w"  },
+    { "id": "SAL",     "name": "SAL Hospital",              "short": "SAL",         "lat": 23.0560, "lon": 72.5240, "type": "hospital", "label": "n"  },
+    { "id": "STERL",   "name": "Sterling Hospital",         "short": "Sterling",    "lat": 23.0480, "lon": 72.5410, "type": "hospital", "label": "s"  },
+    { "id": "VSH",     "name": "V.S. Hospital",             "short": "V.S.",        "lat": 23.0230, "lon": 72.5710, "type": "hospital", "label": "e"  }
+  ],
+  "roads": [
+    { "from": "GOTA",    "to": "SOLA",    "traffic": "low"    },
+    { "from": "GOTA",    "to": "SCIENCE", "traffic": "low"    },
+    { "from": "SCIENCE", "to": "SOLA",    "traffic": "medium" },
+    { "from": "SCIENCE", "to": "THALTEJ", "traffic": "medium" },
+    { "from": "SOLA",    "to": "SOLACIV", "traffic": "low"    },
+    { "from": "SOLA",    "to": "THALTEJ", "traffic": "high"   },
+    { "from": "SOLA",    "to": "DRIVEIN", "traffic": "medium" },
+    { "from": "THALTEJ", "to": "ZYDUS",   "traffic": "low"    },
+    { "from": "THALTEJ", "to": "BODAK",   "traffic": "medium" },
+    { "from": "THALTEJ", "to": "ISCON",   "traffic": "medium" },
+    { "from": "DRIVEIN", "to": "SAL",     "traffic": "low"    },
+    { "from": "DRIVEIN", "to": "HELMET",  "traffic": "medium" },
+    { "from": "DRIVEIN", "to": "BODAK",   "traffic": "low"    },
+    { "from": "ZYDUS",   "to": "BODAK",   "traffic": "medium" },
+    { "from": "BODAK",   "to": "VASTRA",  "traffic": "medium" },
+    { "from": "HELMET",  "to": "STERL",   "traffic": "low"    },
+    { "from": "HELMET",  "to": "VIJAY",   "traffic": "high"   },
+    { "from": "VASTRA",  "to": "STERL",   "traffic": "medium" },
+    { "from": "VASTRA",  "to": "SHIVR",   "traffic": "high"   },
+    { "from": "ISCON",   "to": "SHIVR",   "traffic": "medium" },
+    { "from": "SHIVR",   "to": "PANJRA",  "traffic": "medium" },
+    { "from": "PANJRA",  "to": "VIJAY",   "traffic": "medium" },
+    { "from": "PANJRA",  "to": "PALDI",   "traffic": "medium" },
+    { "from": "VIJAY",   "to": "NAVRANG", "traffic": "medium" },
+    { "from": "NAVRANG", "to": "VSH",     "traffic": "high"   },
+    { "from": "PALDI",   "to": "VSH",     "traffic": "low"    }
+  ],
+  "scenarios": [
+    {
+      "id": "normal",
+      "title": "Normal",
+      "description": "Every road has a positive travel time, so Dijkstra is safe to use.",
+      "src": "GOTA", "dst": "ZYDUS",
+      "roads": {}
+    },
+    {
+      "id": "negative-road",
+      "title": "Negative road",
+      "description": "Science City to Sola Bridge becomes a one-way road with a cost of −6 min. Dijkstra gives a wrong answer here.",
+      "src": "GOTA", "dst": "ZYDUS",
+      "roads": { "SCIENCE~SOLA": { "oneway": true, "cost": -6 } }
+    },
+    {
+      "id": "negative-cycle",
+      "title": "Negative cycle",
+      "description": "Science City and Sola Bridge are joined by a two-way road costing −6 min, so going back and forth lowers the cost forever.",
+      "src": "GOTA", "dst": "ZYDUS",
+      "roads": { "SCIENCE~SOLA": { "cost": -6 } }
+    }
+  ],
+  "map": {
+    "bounds": { "north": 23.1135, "south": 23.0040, "west": 72.4835, "east": 72.5890 },
+    "river": [[23.120, 72.5935], [23.100, 72.5900], [23.080, 72.5875], [23.062, 72.5850], [23.048, 72.5815], [23.036, 72.5785], [23.024, 72.5770], [23.012, 72.5762], [23.000, 72.5755]],
+    "river_name": "Sabarmati",
+    "lakes": [{ "name": "Vastrapur Lake", "lat": 23.0378, "lon": 72.5318, "rx_m": 300, "ry_m": 220 }]
+  }
+}
